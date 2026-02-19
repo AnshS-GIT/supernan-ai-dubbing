@@ -9,12 +9,6 @@ def extract_segment(
     start_time: int,
     end_time: int,
 ) -> str:
-    """
-    Extract a video segment and normalize audio.
-
-    Returns:
-        Path to extracted clip.
-    """
 
     input_path = Path(input_path)
     output_path = Path(output_path)

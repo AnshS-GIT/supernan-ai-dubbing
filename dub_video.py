@@ -1,5 +1,6 @@
 import argparse
 from pipeline.extract import extract_segment
+from pipeline.transcribe import transcribe_audio
 
 
 def main():
@@ -36,6 +37,11 @@ def main():
         output_path=output_clip,
         start_time=args.start,
         end_time=args.end,
+    )
+
+    transcribe_audio(
+        video_path=output_clip,
+        output_json="outputs/transcript.json"
     )
 
 
