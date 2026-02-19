@@ -184,7 +184,7 @@ Cost becomes measurable and predictable.
 
 ---
 
-### Core Scaling Principle
+# Core Scaling Principle
 
 Design every stage to be:
     - Stateless

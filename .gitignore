@@ -1,0 +1,10 @@
+*.mp4
+*.wav
+*.mp3
+
+outputs/
+
+__pycache__/
+venv/
+
+.DS_Store
