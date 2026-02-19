@@ -4,31 +4,20 @@ from pathlib import Path
 
 
 def transcribe_audio(video_path: str, output_json: str):
+    print("Loading Whisper medium model...")
+    model = whisper.load_model("medium")
 
-    print("Loading Whisper model...")
-    model = whisper.load_model("small")
-
-    print("Detecting language...")
-    audio = whisper.load_audio(video_path)
-    audio = whisper.pad_or_trim(audio)
-    mel = whisper.log_mel_spectrogram(audio).to(model.device)
-
-    _, probs = model.detect_language(mel)
-    detected_language = max(probs, key=probs.get)
-
-    print(f"Detected language: {detected_language}")
-
-    print("Transcribing audio...")
+    print("Transcribing Kannada audio...")
     result = model.transcribe(
         video_path,
-        language=detected_language,
+        language="kn",
         task="transcribe"
     )
 
     segments = result["segments"]
 
     transcript_data = {
-        "language": detected_language,
+        "language": "kn",
         "segments": []
     }
 
