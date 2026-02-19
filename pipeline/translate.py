@@ -52,14 +52,21 @@ def translate_transcript(input_json: str, output_json: str):
 
     translated_segments = []
 
-    for seg in data["segments"]:
-        hindi_text = translator.translate_kn_to_hi(seg["text"])
+    for seg in result["segments"]:
+        text = seg["text"].strip()
+
+        if len(text) < 3:
+            continue
+
+        if len(set(text)) < 5:
+            continue    
+
+        translated_text = translator.translate_kn_to_hi(text)
 
         translated_segments.append({
-            "start": seg["start"],
-            "end": seg["end"],
-            "text_kn": seg["text"],
-            "text_hi": hindi_text
+            "start": round(seg["start"], 2),
+            "end": round(seg["end"], 2),
+            "text": text
         })
 
     final_output = {
