@@ -2,6 +2,7 @@ import json
 import torch
 from pathlib import Path
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+from pipeline.refine import HindiRefiner
 
 
 class NLLBTranslator:
@@ -47,22 +48,27 @@ class NLLBTranslator:
 
 
 def translate_transcript(input_json: str, output_json: str) -> dict:
-    
+
     with open(input_json, "r", encoding="utf-8") as f:
         data = json.load(f)
 
     translator = NLLBTranslator()
+    refiner = HindiRefiner()
+
     translated_segments = []
 
     for seg in data["segments"]:
         text_kn = seg["text"].strip()
-        translated_text = translator.translate(text_kn)
+
+        rough_hindi = translator.translate(text_kn)
+
+        refined_hindi = refiner.refine(rough_hindi)
 
         translated_segments.append({
             "start": round(seg["start"], 2),
             "end": round(seg["end"], 2),
             "text_kn": text_kn,
-            "text_hi": translated_text,
+            "text_hi": refined_hindi,
         })
 
     final_output = {
@@ -72,8 +78,10 @@ def translate_transcript(input_json: str, output_json: str) -> dict:
     }
 
     Path(output_json).parent.mkdir(parents=True, exist_ok=True)
+
     with open(output_json, "w", encoding="utf-8") as f:
         json.dump(final_output, f, indent=4, ensure_ascii=False)
 
     print(f"[translate] {len(translated_segments)} segments translated → {output_json}")
     return final_output
+
