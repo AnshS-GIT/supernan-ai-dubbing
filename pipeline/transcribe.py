@@ -11,7 +11,12 @@ def transcribe_audio(video_path: str, output_json: str):
     result = model.transcribe(
         video_path,
         language="kn",
-        task="transcribe"
+        task="transcribe",
+        beam_size=5,
+        best_of=5,
+        temperature=0.0,
+        condition_on_previous_text=False,
+        fp16=False
     )
 
     segments = result["segments"]
