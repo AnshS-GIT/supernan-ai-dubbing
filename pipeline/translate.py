@@ -8,14 +8,14 @@ class IndicTranslator:
     def __init__(self):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
-        model_name = "ai4bharat/indictrans2-indic-en-1B"
+        model_name = "ai4bharat/indictrans2-indic-indic-1B"
 
-        print("Loading IndicTrans2 model...")
+        print("Loading IndicTrans2 (Indic-Indic) model...")
         self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
         self.model = AutoModelForSeq2SeqLM.from_pretrained(model_name, trust_remote_code=True).to(self.device)
 
     def translate_kn_to_hi(self, text: str) -> str:
-        input_text = f"<kn> {text}"
+        input_text = f"<kn> {text} </kn>"
 
         inputs = self.tokenizer(
             input_text,
@@ -67,5 +67,4 @@ def translate_transcript(input_json: str, output_json: str):
         json.dump(final_output, f, indent=4, ensure_ascii=False)
 
     print("Translation completed.")
-
     return final_output
