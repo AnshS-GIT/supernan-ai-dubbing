@@ -4,28 +4,38 @@ import json
 from pathlib import Path
 
 
-class IndicTranslator:
+class NLLBTranslator:
     def __init__(self):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
-        model_name = "ai4bharat/indictrans2-indic-indic-1B"
+        model_name = "facebook/nllb-200-distilled-600M"
 
-        print("Loading IndicTrans2 (Indic-Indic) model...")
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
-        self.model = AutoModelForSeq2SeqLM.from_pretrained(model_name, trust_remote_code=True).to(self.device)
+        print("Loading NLLB-200 model...")
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.model = AutoModelForSeq2SeqLM.from_pretrained(model_name).to(self.device)
+
+        # Language codes
+        self.src_lang = "kan_Knda"
+        self.tgt_lang = "hin_Deva"
 
     def translate_kn_to_hi(self, text: str) -> str:
-        input_text = f"<kn> {text} </kn>"
+        """
+        Translate Kannada → Hindi using NLLB.
+        """
+
+        self.tokenizer.src_lang = self.src_lang
 
         inputs = self.tokenizer(
-            input_text,
+            text,
             return_tensors="pt",
-            padding=True
+            padding=True,
+            truncation=True
         ).to(self.device)
 
         with torch.no_grad():
             generated_tokens = self.model.generate(
                 **inputs,
+                forced_bos_token_id=self.tokenizer.lang_code_to_id[self.tgt_lang],
                 max_length=256
             )
 
@@ -38,7 +48,7 @@ class IndicTranslator:
 
 
 def translate_transcript(input_json: str, output_json: str):
-    translator = IndicTranslator()
+    translator = NLLBTranslator()
 
     with open(input_json, "r", encoding="utf-8") as f:
         data = json.load(f)
