@@ -9,8 +9,8 @@ def transcribe_audio(audio_path: str, output_json: str):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
 
-    print("Loading Whisper medium model...")
-    model = whisper.load_model("medium").to(device)
+    print("Loading Whisper large model...")
+    model = whisper.load_model("large").to(device)
 
     print("Transcribing Kannada audio...")
 
@@ -18,9 +18,7 @@ def transcribe_audio(audio_path: str, output_json: str):
         audio_path,
         language="kn",
         task="transcribe",
-        beam_size=3,
-        temperature=0.0,
-        condition_on_previous_text=False
+        temperature=0.0
     )
 
     transcript_data = {
