@@ -14,15 +14,10 @@ class NLLBTranslator:
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.model = AutoModelForSeq2SeqLM.from_pretrained(model_name).to(self.device)
 
-        # Language codes
         self.src_lang = "kan_Knda"
         self.tgt_lang = "hin_Deva"
 
     def translate_kn_to_hi(self, text: str) -> str:
-        """
-        Translate Kannada → Hindi using NLLB.
-        """
-
         self.tokenizer.src_lang = self.src_lang
 
         inputs = self.tokenizer(
@@ -32,10 +27,12 @@ class NLLBTranslator:
             truncation=True
         ).to(self.device)
 
+        forced_bos_token_id = self.tokenizer.convert_tokens_to_ids(self.tgt_lang)
+
         with torch.no_grad():
             generated_tokens = self.model.generate(
                 **inputs,
-                forced_bos_token_id=self.tokenizer.lang_code_to_id[self.tgt_lang],
+                forced_bos_token_id=forced_bos_token_id,
                 max_length=256
             )
 
