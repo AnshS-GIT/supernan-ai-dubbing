@@ -4,12 +4,15 @@ import whisper
 from pathlib import Path
 
 
-def _is_valid_segment(text: str) -> bool:
+def _is_valid_segment(text: str, duration: float) -> bool:
     text = text.strip()
+    if duration < 0.5:
+        return False
     if len(text) < 3:
         return False
     if len(set(text)) < 5:
         return False
+
     return True
 
 
@@ -34,11 +37,15 @@ def transcribe_audio(audio_path: str, output_json: str) -> dict:
     )
 
     segments = []
+
     for seg in result["segments"]:
         text = seg["text"].strip()
-        if not _is_valid_segment(text):
+        duration = seg["end"] - seg["start"]
+
+        if not _is_valid_segment(text, duration):
             print(f"[transcribe] Skipped corrupted segment: {repr(text)}")
             continue
+
         segments.append({
             "start": round(seg["start"], 2),
             "end": round(seg["end"], 2),
@@ -54,5 +61,5 @@ def transcribe_audio(audio_path: str, output_json: str) -> dict:
     with open(output_json, "w", encoding="utf-8") as f:
         json.dump(transcript_data, f, indent=4, ensure_ascii=False)
 
-    print(f"[transcribe] {len(segments)} segments saved → {output_json}")
+    print(f"[transcribe] {len(segments)} valid segments saved → {output_json}")
     return transcript_data
