@@ -1,3 +1,53 @@
-openai-whisper
-torch
-ffmpeg-python
+# ============================================================
+# Supernan AI Dubbing Pipeline — Python Dependencies
+# ============================================================
+# Run on Google Colab (free tier) or local GPU machine.
+# Install with:
+#   pip install -r requirements.txt
+#
+# IMPORTANT: Install IndicTrans2 separately (see note below).
+# ============================================================
+
+# ── Core ML ─────────────────────────────────────────────────
+torch>=2.1.0                 # GPU inference; Colab ships with CUDA build
+torchaudio>=2.1.0
+
+# ── ASR ─────────────────────────────────────────────────────
+openai-whisper>=20231117     # Whisper Large model (transcription)
+
+# ── Translation: IndicTrans2 ─────────────────────────────────
+# HuggingFace Transformers — required for IndicTrans2 model loading.
+transformers>=4.38.0
+sentencepiece>=0.1.99        # tokenizer dependency for IndicTrans2
+sacremoses>=0.1.1            # preprocessing utility
+protobuf>=3.20.0             # required by sentencepiece on some platforms
+accelerate>=0.27.0           # model device_map / mixed-precision support
+
+# ── HuggingFace Hub ─────────────────────────────────────────
+huggingface-hub>=0.21.0      # model download + token auth
+
+# ── Media Processing ─────────────────────────────────────────
+ffmpeg-python>=0.2.0         # Python bindings (subprocess wrapper)
+# NOTE: The `ffmpeg` binary must also be installed:
+#   Colab:  !apt-get install -y ffmpeg
+#   macOS:  brew install ffmpeg
+#   Ubuntu: sudo apt-get install -y ffmpeg
+
+# ── Utilities ────────────────────────────────────────────────
+numpy>=1.24.0
+tqdm>=4.66.0                 # progress bars
+
+# ============================================================
+# IndicTrans2 — extra setup (models/tokenizer/scripts)
+# ============================================================
+# IndicTrans2 requires additional preprocessing scripts from the
+# AI4Bharat repo. Install with:
+#
+#   pip install git+https://github.com/VarunGumma/IndicTransToolkit.git
+#
+# This provides the IndicProcessor class used by the model's
+# inference pipeline. You do NOT need to clone the full repo.
+#
+# Optional (for word-level alignment):
+#   pip install ctranslate2
+# ============================================================

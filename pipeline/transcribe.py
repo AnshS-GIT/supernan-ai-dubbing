@@ -1,29 +1,107 @@
+"""
+pipeline/transcribe.py
+----------------------
+Stage 2: Kannada audio transcription using OpenAI Whisper Large.
+
+Responsibilities:
+- Load Whisper Large on GPU (CUDA) when available, fall back to CPU.
+- Transcribe Kannada (kn) audio with optimal parameters.
+- Filter out hallucinated / corrupted ASR segments.
+- Serialize clean transcript to JSON.
+
+Output schema:
+    {
+        "language": "kn",
+        "segments": [
+            {"start": <float>, "end": <float>, "text": "<string>"}
+        ]
+    }
+"""
+
 import json
+import logging
+from pathlib import Path
+
 import torch
 import whisper
-from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Hallucination / noise filters
+# ---------------------------------------------------------------------------
+
+# Whisper sometimes produces these verbatim artifacts on silence or noise.
+_KNOWN_HALLUCINATIONS: set[str] = {
+    "...",
+    "ಧನ್ಯವಾದ",      # "Thank you" repeated on silence
+    "ಧನ್ಯವಾದಗಳು",
+    "ಸಂಗೀತ",         # "[Music]"
+    "[music]",
+    "[silence]",
+    "[applause]",
+}
 
 
 def _is_valid_segment(text: str, duration: float) -> bool:
-    text = text.strip()
+    """
+    Return True only if the segment passes all quality gates.
+
+    Gates:
+      1. Minimum duration   → 0.5 s
+      2. Minimum text length → 3 characters (after strip)
+      3. Minimum uniqueness  → at least 5 distinct characters
+      4. Not a known hallucination string
+    """
+    stripped = text.strip()
+
     if duration < 0.5:
+        logger.debug("[transcribe] Rejected (too short %.2fs): %r", duration, stripped)
         return False
-    if len(text) < 3:
+
+    if len(stripped) < 3:
+        logger.debug("[transcribe] Rejected (text too short): %r", stripped)
         return False
-    if len(set(text)) < 5:
+
+    if len(set(stripped)) < 5:
+        logger.debug("[transcribe] Rejected (low uniqueness): %r", stripped)
+        return False
+
+    if stripped.lower() in {h.lower() for h in _KNOWN_HALLUCINATIONS}:
+        logger.debug("[transcribe] Rejected (known hallucination): %r", stripped)
         return False
 
     return True
 
 
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
 def transcribe_audio(audio_path: str, output_json: str) -> dict:
+    """
+    Transcribe a Kannada audio file with Whisper Large and save the result.
+
+    Args:
+        audio_path:  Path to the 16kHz mono WAV audio file.
+        output_json: Destination path for the JSON transcript.
+
+    Returns:
+        Parsed transcript dict matching the output schema above.
+
+    Notes:
+        • word_timestamps=True enables fine-grained alignment useful for TTS sync.
+        • condition_on_previous_text=False reduces error propagation across segments.
+        • GPU is used automatically when torch.cuda.is_available().
+    """
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"[transcribe] Device: {device}")
+    logger.info("[transcribe] Device: %s", device)
 
-    print("[transcribe] Loading Whisper large model...")
-    model = whisper.load_model("large").to(device)
+    logger.info("[transcribe] Loading Whisper 'large' model…")
+    model = whisper.load_model("large", device=device)
 
-    print("[transcribe] Transcribing...")
+    logger.info("[transcribe] Transcribing %s …", audio_path)
     result = model.transcribe(
         audio_path,
         language="kn",
@@ -36,30 +114,38 @@ def transcribe_audio(audio_path: str, output_json: str) -> dict:
         compression_ratio_threshold=2.4,
     )
 
-    segments = []
+    segments: list[dict] = []
+    rejected = 0
 
     for seg in result["segments"]:
         text = seg["text"].strip()
         duration = seg["end"] - seg["start"]
 
         if not _is_valid_segment(text, duration):
-            print(f"[transcribe] Skipped corrupted segment: {repr(text)}")
+            rejected += 1
             continue
 
         segments.append({
-            "start": round(seg["start"], 2),
-            "end": round(seg["end"], 2),
+            "start": round(seg["start"], 3),
+            "end": round(seg["end"], 3),
             "text": text,
         })
+
+    logger.info(
+        "[transcribe] %d valid segments kept, %d rejected",
+        len(segments), rejected,
+    )
 
     transcript_data = {
         "language": "kn",
         "segments": segments,
     }
 
-    Path(output_json).parent.mkdir(parents=True, exist_ok=True)
-    with open(output_json, "w", encoding="utf-8") as f:
+    output = Path(output_json)
+    output.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(output, "w", encoding="utf-8") as f:
         json.dump(transcript_data, f, indent=4, ensure_ascii=False)
 
-    print(f"[transcribe] {len(segments)} valid segments saved → {output_json}")
+    logger.info("[transcribe] Transcript saved → %s", output)
     return transcript_data
