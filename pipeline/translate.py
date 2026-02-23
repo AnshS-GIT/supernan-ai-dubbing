@@ -1,14 +1,21 @@
 """
 pipeline/translate.py
 ---------------------
-Stage 4: Kannada → Hindi translation using IndicTrans2 (ai4bharat).
+Stage 4: Kannada → Hindi translation using NLLB-200 (Meta).
 
 Responsibilities:
-- Load IndicTrans2 indic-indic model once.
+- Load NLLB-200-distilled-600M once (no gated access, no HF token needed).
 - Normalize each Kannada segment before translation.
-- Translate Kannada (kn) → Hindi (hi) directly (no pivot language).
+- Translate Kannada → Hindi via English pivot for higher quality.
 - Preserve start/end timestamps throughout.
 - Serialize structured JSON output for the downstream TTS stage.
+
+Translation strategy:
+    Kannada (kan_Knda) → English (eng_Latn) → Hindi (hin_Deva)
+
+    Pivot through English improves quality for low-resource pairs.
+    Direct Kn→Hi is also possible by calling _translate() directly,
+    but pivot yields noticeably better output with NLLB-200-distilled.
 
 Output schema:
     {
@@ -26,19 +33,17 @@ Output schema:
     }
 
 Model:
-    ai4bharat/indictrans2-indic-indic-1B   (Kannada → Hindi, direct)
-    Requires HuggingFace token via:
-        export HF_TOKEN=<your_token>   or   HUGGINGFACE_HUB_TOKEN=<your_token>
+    facebook/nllb-200-distilled-600M
+    — Free, ungated, no HuggingFace login required.
+    — Works with transformers >= 4.39 / 5.x.
 
 References:
-    https://github.com/AI4Bharat/IndicTrans2
+    https://huggingface.co/facebook/nllb-200-distilled-600M
 """
 
 import json
 import logging
-import os
 from pathlib import Path
-from typing import Optional
 
 import torch
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
@@ -51,71 +56,68 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-_MODEL_NAME = "ai4bharat/indictrans2-indic-indic-1B"
+_MODEL_NAME = "facebook/nllb-200-distilled-600M"
 
-# IndicTrans2 language codes (Flores-200 / IndicTrans2 format)
-_SRC_LANG = "kan_Knda"   # Kannada in Kannada script
-_TGT_LANG = "hin_Deva"   # Hindi in Devanagari script
+# NLLB-200 / Flores-200 language codes
+_LANG_KN = "kan_Knda"   # Kannada in Kannada script
+_LANG_EN = "eng_Latn"   # English in Latin script
+_LANG_HI = "hin_Deva"   # Hindi in Devanagari script
 
 
 # ---------------------------------------------------------------------------
-# IndicTrans2 wrapper
+# NLLB-200 Translator
 # ---------------------------------------------------------------------------
 
-class IndicTrans2Translator:
+class NLLBTranslator:
     """
-    Lazy-singleton wrapper around the IndicTrans2 indic-indic model.
+    Wrapper around the NLLB-200-distilled-600M model for translation.
+
+    Default strategy: pivot translation  Kannada → English → Hindi.
+    Direct translation is also available via `_translate()`.
 
     Usage:
-        translator = IndicTrans2Translator()
+        translator = NLLBTranslator()
         hindi = translator.translate("ಹೇಗಿದ್ದೀರಿ?")
     """
 
-    def __init__(self, hf_token: Optional[str] = None):
+    def __init__(self):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         logger.info("[translate] Device: %s", self.device)
 
-        token = hf_token or os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_HUB_TOKEN")
-        if not token:
-            logger.warning(
-                "[translate] No HuggingFace token found. "
-                "Set HF_TOKEN environment variable if the model is gated."
-            )
-
-        logger.info("[translate] Loading IndicTrans2 model: %s …", _MODEL_NAME)
+        logger.info("[translate] Loading NLLB-200 model: %s …", _MODEL_NAME)
 
         self.tokenizer = AutoTokenizer.from_pretrained(
             _MODEL_NAME,
-            token=token,
-            trust_remote_code=True,
+            trust_remote_code=False,
         )
         self.model = AutoModelForSeq2SeqLM.from_pretrained(
             _MODEL_NAME,
-            token=token,
-            trust_remote_code=True,
+            trust_remote_code=False,
         ).to(self.device)
         self.model.eval()
 
         logger.info("[translate] Model loaded on %s.", self.device)
 
-    def translate(self, text: str) -> str:
-        """
-        Translate a single Kannada string to Hindi.
+    # -----------------------------------------------------------------------
+    # Internal: generic single-pair translation
+    # -----------------------------------------------------------------------
 
-        IndicTrans2 uses special language-tag tokens prepended to input text.
-        The tokenizer handles this automatically via src_lang / tgt_lang.
+    def _translate(self, text: str, src_lang: str, tgt_lang: str) -> str:
+        """
+        Translate a single string between any NLLB-200 language pair.
 
         Args:
-            text: Kannada text (should already be normalized).
+            text:     Source text string.
+            src_lang: NLLB-200 source language code (e.g. "kan_Knda").
+            tgt_lang: NLLB-200 target language code (e.g. "eng_Latn").
 
         Returns:
-            Translated Hindi string.
+            Translated string.
         """
         if not text.strip():
             return ""
 
-        # IndicTrans2 requires the source language prefix injected by the tokenizer.
-        self.tokenizer.src_lang = _SRC_LANG
+        self.tokenizer.src_lang = src_lang
 
         inputs = self.tokenizer(
             text,
@@ -125,7 +127,7 @@ class IndicTrans2Translator:
             max_length=256,
         ).to(self.device)
 
-        tgt_lang_id = self.tokenizer.convert_tokens_to_ids(_TGT_LANG)
+        tgt_lang_id = self.tokenizer.convert_tokens_to_ids(tgt_lang)
 
         with torch.no_grad():
             output_tokens = self.model.generate(
@@ -143,6 +145,32 @@ class IndicTrans2Translator:
 
         return translated.strip()
 
+    # -----------------------------------------------------------------------
+    # Public: Kannada → Hindi (pivot through English)
+    # -----------------------------------------------------------------------
+
+    def translate(self, text: str) -> str:
+        """
+        Translate Kannada text to Hindi using English as a pivot language.
+
+        Pipeline:  Kannada → English → Hindi
+        This yields better results than direct Kn→Hi for the distilled model.
+
+        Args:
+            text: Kannada text (should already be normalized).
+
+        Returns:
+            Translated Hindi string.
+        """
+        if not text.strip():
+            return ""
+
+        english = self._translate(text, _LANG_KN, _LANG_EN)
+        logger.debug("[translate]   pivot_en: %r", english)
+
+        hindi = self._translate(english, _LANG_EN, _LANG_HI)
+        return hindi
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -151,19 +179,17 @@ class IndicTrans2Translator:
 def translate_transcript(
     input_json: str,
     output_json: str,
-    hf_token: Optional[str] = None,
 ) -> dict:
     """
     Translate a Whisper transcript JSON from Kannada to Hindi.
 
     Reads the transcript produced by ``transcribe_audio()``, normalizes
-    each Kannada segment, translates it with IndicTrans2, and writes
-    the enriched JSON to *output_json*.
+    each Kannada segment, translates it with NLLB-200 (pivot through
+    English), and writes the enriched JSON to *output_json*.
 
     Args:
         input_json:  Path to the Whisper transcript JSON.
         output_json: Destination path for the translated JSON.
-        hf_token:    Optional HuggingFace token (falls back to env vars).
 
     Returns:
         Parsed output dict matching the schema defined at module top.
@@ -174,7 +200,7 @@ def translate_transcript(
         data = json.load(f)
 
     # Load model once — expensive, do not reload per segment.
-    translator = IndicTrans2Translator(hf_token=hf_token)
+    translator = NLLBTranslator()
 
     translated_segments: list[dict] = []
     total = len(data["segments"])

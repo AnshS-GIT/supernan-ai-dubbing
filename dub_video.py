@@ -19,14 +19,16 @@ Stages:
     STEP 1 — Extract video segment (extract_segment)
     STEP 2 — Extract clean 16kHz mono audio (extract_audio)
     STEP 3 — Transcribe Kannada audio (Whisper Large)
-    STEP 4 — Normalize + Translate Kannada → Hindi (IndicTrans2)
+    STEP 4 — Normalize + Translate Kannada → Hindi (NLLB-200 pivot)
 
 Future stages (placeholders ready):
     STEP 5 — TTS: synthesize Hindi audio from segments
     STEP 6 — Lip-sync: align TTS audio to video faces
 
-Environment variables:
-    HF_TOKEN or HUGGINGFACE_HUB_TOKEN — required if IndicTrans2 model is gated.
+Stack:
+    ASR:          openai-whisper (Whisper Large)
+    Translation:  facebook/nllb-200-distilled-600M (Kn→En→Hi pivot)
+    Media:        ffmpeg (subprocess)
 """
 
 import argparse
@@ -129,9 +131,9 @@ def run_pipeline(
     )
 
     # ------------------------------------------------------------------
-    # STEP 4 — Normalize Kannada + Translate → Hindi (IndicTrans2)
+    # STEP 4 — Normalize Kannada + Translate → Hindi (NLLB-200 pivot)
     # ------------------------------------------------------------------
-    _header(4, "Normalize + Translate  (Kannada → Hindi via IndicTrans2)")
+    _header(4, "Normalize + Translate  (Kannada → Hindi via NLLB-200)")
     translate_transcript(
         input_json=outputs["transcript"],
         output_json=outputs["translated"],

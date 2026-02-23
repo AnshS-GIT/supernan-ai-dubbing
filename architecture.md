@@ -53,7 +53,7 @@ I deliberately prioritized open-source tools over paid APIs.
 
 Tools used:
     - Whisper (Transcription)
-    - IndicTrans2 (Translation)
+    - NLLB-200 (Translation — facebook/nllb-200-distilled-600M, pivot Kn→En→Hi)
     - Coqui XTTS (Voice Cloning)
     - VideoReTalking / Wav2Lip (Lip Sync)
     - CodeFormer (Face Restoration)
