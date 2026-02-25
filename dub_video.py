@@ -1,36 +1,3 @@
-"""
-dub_video.py
-------------
-Supernan AI Dubbing Pipeline — main orchestrator.
-
-Usage:
-    python dub_video.py \\
-        --input  massage2.mp4 \\
-        --start  0 \\
-        --end    15
-
-    # Full-length video (processes as a single segment):
-    python dub_video.py --input massage2.mp4 --start 0 --end 3600
-
-    # With explicit output directory:
-    python dub_video.py --input massage2.mp4 --start 0 --end 15 --outdir outputs/run1
-
-Stages:
-    STEP 1 — Extract video segment (extract_segment)
-    STEP 2 — Extract clean 16kHz mono audio (extract_audio)
-    STEP 3 — Transcribe Kannada audio (Whisper Large)
-    STEP 4 — Normalize + Translate Kannada → Hindi (NLLB-200 pivot)
-
-Future stages (placeholders ready):
-    STEP 5 — TTS: synthesize Hindi audio from segments
-    STEP 6 — Lip-sync: align TTS audio to video faces
-
-Stack:
-    ASR:          openai-whisper (Whisper Large)
-    Translation:  facebook/nllb-200-distilled-600M (Kn→En→Hi pivot)
-    Media:        ffmpeg (subprocess)
-"""
-
 import argparse
 import logging
 import sys
@@ -39,10 +6,10 @@ from pathlib import Path
 from pipeline.extract import extract_audio, extract_segment
 from pipeline.transcribe import transcribe_audio
 from pipeline.translate import translate_transcript
+from pipeline.tts import generate_hindi_tts
 
-# ---------------------------------------------------------------------------
-# Logging
-# ---------------------------------------------------------------------------
+from pydub import AudioSegment
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -53,21 +20,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Step header helper
-# ---------------------------------------------------------------------------
-
 def _header(step: int, title: str) -> None:
-    """Print a clearly visible stage separator to stdout."""
     print()
     print("=" * 60)
     print(f"  STEP {step}: {title}")
     print("=" * 60)
 
-
-# ---------------------------------------------------------------------------
-# Pipeline orchestrator
-# ---------------------------------------------------------------------------
 
 def run_pipeline(
     input_path: str,
@@ -75,23 +33,7 @@ def run_pipeline(
     end_time: float,
     outdir: str = "outputs",
 ) -> dict:
-    """
-    Run the full dubbing pipeline for a single video segment.
 
-    Args:
-        input_path: Absolute or relative path to the source video.
-        start_time: Segment start in seconds.
-        end_time:   Segment end in seconds.
-        outdir:     Directory to write all intermediate and final outputs.
-
-    Returns:
-        Dict with paths to all output files produced.
-
-    Design note:
-        The function is intentionally single-segment to keep memory bounded.
-        For long video batch processing, call this function in a loop (or via
-        concurrent.futures.ProcessPoolExecutor) over ordered 15-30 s windows.
-    """
     base = Path(outdir)
 
     outputs = {
@@ -99,11 +41,11 @@ def run_pipeline(
         "audio":       str(base / "audio.wav"),
         "transcript":  str(base / "transcript.json"),
         "translated":  str(base / "translated.json"),
+        "speaker_ref": str(base / "speaker_ref.wav"),
+        "tts_audio":   str(base / "hindi_tts.wav"),
     }
 
-    # ------------------------------------------------------------------
-    # STEP 1 — Video segment extraction
-    # ------------------------------------------------------------------
+    # STEP 1 — Extract Video Segment
     _header(1, "Extract Video Segment")
     extract_segment(
         input_path=input_path,
@@ -112,36 +54,41 @@ def run_pipeline(
         end_time=end_time,
     )
 
-    # ------------------------------------------------------------------
-    # STEP 2 — Audio extraction (16kHz mono WAV)
-    # ------------------------------------------------------------------
+    # STEP 2 — Extract Clean Audio
     _header(2, "Extract Clean Audio  (16 kHz mono WAV)")
     extract_audio(
         video_path=outputs["clip"],
         audio_output=outputs["audio"],
     )
 
-    # ------------------------------------------------------------------
-    # STEP 3 — Whisper Large transcription (Kannada)
-    # ------------------------------------------------------------------
+    # STEP 3 — Transcribe
     _header(3, "Transcribe Kannada Audio  (Whisper Large)")
     transcribe_audio(
         audio_path=outputs["audio"],
         output_json=outputs["transcript"],
     )
 
-    # ------------------------------------------------------------------
-    # STEP 4 — Normalize Kannada + Translate → Hindi (NLLB-200 pivot)
-    # ------------------------------------------------------------------
+    # STEP 4 — Normalize + Translate
     _header(4, "Normalize + Translate  (Kannada → Hindi via NLLB-200)")
     translate_transcript(
         input_json=outputs["transcript"],
         output_json=outputs["translated"],
     )
 
-    # ------------------------------------------------------------------
-    # Summary
-    # ------------------------------------------------------------------
+    # STEP 5 — XTTS Voice Cloning
+    _header(5, "Generate Hindi Voice  (XTTS v2 Voice Cloning)")
+
+    print("[tts] Creating speaker reference clip...")
+    audio = AudioSegment.from_wav(outputs["audio"])
+    ref_audio = audio[:8000]  # first 8 seconds
+    ref_audio.export(outputs["speaker_ref"], format="wav")
+
+    generate_hindi_tts(
+        input_json=outputs["translated"],
+        output_audio=outputs["tts_audio"],
+        speaker_ref=outputs["speaker_ref"],
+    )
+
     print()
     print("=" * 60)
     print("  Pipeline completed successfully.")
@@ -150,44 +97,43 @@ def run_pipeline(
     print(f"  Audio WAV      → {outputs['audio']}")
     print(f"  Transcript     → {outputs['transcript']}")
     print(f"  Translation    → {outputs['translated']}")
-    print()
-    print("  Next stages (not yet implemented):")
-    print("    STEP 5 — TTS: synthesize Hindi voice")
-    print("    STEP 6 — Lip-sync: align audio to video")
+    print(f"  Hindi TTS      → {outputs['tts_audio']}")
     print("=" * 60)
 
     return outputs
 
-
-# ---------------------------------------------------------------------------
-# CLI entry point
-# ---------------------------------------------------------------------------
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Supernan AI Dubbing Pipeline — Kannada → Hindi",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
+
     parser.add_argument(
         "--input", required=True,
-        help="Path to the source video file (e.g. massage2.mp4)",
+        help="Path to the source video file",
     )
+
     parser.add_argument(
         "--start", type=float, default=0.0,
         help="Segment start time in seconds",
     )
+
     parser.add_argument(
         "--end", type=float, required=True,
         help="Segment end time in seconds",
     )
+
     parser.add_argument(
         "--outdir", default="outputs",
-        help="Output directory for all generated files",
+        help="Output directory",
     )
+
     parser.add_argument(
         "--debug", action="store_true",
         help="Enable DEBUG-level logging",
     )
+
     return parser.parse_args()
 
 
